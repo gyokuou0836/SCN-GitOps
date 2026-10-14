@@ -1,0 +1,27 @@
+name: aws-auth
+description: >-
+  GitHub Actions が発行する OIDC トークンで AWS のデプロイロールを引き受ける複合アクション。
+  ロールの信頼ポリシーは `environment:<name>` を含む immutable な sub を信頼している前提
+  （詳細は docs/iam/README.md）。
+  なお `permissions:` は複合アクションからは付与できないため、
+  呼び出し側のワークフローで `id-token: write` を宣言しておく必要がある。
+
+inputs:
+  role-arn:
+    description: 引き受ける IAM ロールの ARN（GitHub Secret AWS_ROLE_ARN を想定）
+    required: true
+  aws-region:
+    description: AWS リージョン
+    required: false
+    default: ap-northeast-1
+
+runs:
+  using: composite
+  steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v6
+      with:
+        role-to-assume: ${{ inputs.role-arn }}
+        aws-region: ${{ inputs.aws-region }}
+        # セッションタグを付与するには別途 sts:TagSession の許可が必要なため無効化する
+        role-skip-session-tagging: true

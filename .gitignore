@@ -1,0 +1,15 @@
+# --- dependencies ---
+node_modules/
+
+# --- CDK / TypeScript build output ---
+dist/
+cdk.out/
+*.tsbuildinfo
+
+# `cdk deploy --outputs-file` が生成するスタック出力（デプロイのたびに変わる）
+cdk-outputs.json
+
+# --- editor / OS ---
+.DS_Store
+.vscode/
+!.vscode/settings.json

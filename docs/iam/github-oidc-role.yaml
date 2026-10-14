@@ -1,0 +1,152 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  SCN-GitOps (GitHub Actions + AWS CDK) dedicated deploy role, and (optionally)
+  the GitHub OIDC provider. This is a reference template for creating a role in a
+  new environment/account: every identifier is taken from a parameter, so no real
+  account/owner/repository value is stored in this file.
+
+  The role is intentionally narrow: it can only manage this repository's
+  CloudFormation stack and the S3 practice bucket that the stack creates.
+  It does NOT depend on `cdk bootstrap` (no toolkit bucket / bootstrap roles /
+  /cdk-bootstrap SSM parameter), because deploys run with the CLI's own
+  credentials (LegacyStackSynthesizer) instead of the bootstrap roles.
+
+Parameters:
+  GitHubOwner:
+    Type: String
+    Description: Target GitHub Organization/Owner name (required).
+  GitHubOwnerId:
+    Type: String
+    Description: >-
+      Immutable GitHub owner (account) ID included in the OIDC subject
+      (required). Identical for every repository under this account and for
+      every environment/branch, so it never changes when adding an environment.
+  GitHubRepository:
+    Type: String
+    Description: Target GitHub repository name (required).
+  GitHubRepositoryId:
+    Type: String
+    Description: >-
+      Immutable GitHub repository ID included in the OIDC subject.
+      Identical for every environment/branch; only the environment:<name>
+      suffix differs per environment.
+  EnvironmentName:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+    Description: >-
+      GitHub Environment name (one role per environment). The immutable subject
+      for this environment is
+      repo:<owner>@<owner-id>/<repo>@<repo-id>:environment:<EnvironmentName>.
+  RoleNamePrefix:
+    Type: String
+    Default: github-actions-scn-gitops
+    Description: >-
+      Role name prefix. The created role is
+      <RoleNamePrefix>-deploy-<EnvironmentName>, e.g.
+      github-actions-scn-gitops-deploy-dev. Keep it different from the role used
+      by other repositories so that this stack never modifies them.
+  StackNamePrefix:
+    Type: String
+    Default: scn-gitops-s3-practice
+    Description: >-
+      Stack name prefix (required). The stack is <StackNamePrefix>-<EnvironmentName>
+      (matches infra/config/<EnvironmentName>.json) and the bucket created by the
+      stack is named <StackNamePrefix>-<EnvironmentName>-<AWS::AccountId>.
+  LocalUserName:
+    Type: String
+    Description: IAM user allowed to assume the role for local testing (required)
+  CreateOidcProvider:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: Set false if token.actions.githubusercontent.com provider already exists
+
+Conditions:
+  CreateProvider: !Equals [!Ref CreateOidcProvider, 'true']
+
+Resources:
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: CreateProvider
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList: [sts.amazonaws.com]
+
+  DeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${RoleNamePrefix}-deploy-${EnvironmentName}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # GitHub Actions (OIDC): only this repository + this environment may assume the role.
+          # `sub` uses the immutable form
+          # (repo:<owner>@<owner-id>/<repo>@<repo-id>:environment:<env>) and must match the value
+          # printed by the workflow step "Show Expected OIDC Subject" (see docs/iam/README.md).
+          - Effect: Allow
+            Principal:
+              Federated: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub:
+                  - !Sub repo:${GitHubOwner}@${GitHubOwnerId}/${GitHubRepository}@${GitHubRepositoryId}:environment:${EnvironmentName}
+          # Local testing (optional): the developer user may assume the role from their own
+          # AWS CLI session. Only useful if that user is also allowed to call sts:AssumeRole.
+          - Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:user/${LocalUserName}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: scn-gitops-cdk-deploy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # CloudFormation: create/update the stack directly. `cdk deploy --method=direct`
+              # never creates a change set, so cloudformation:CreateChangeSet is not needed.
+              # The read actions are the ones the CDK CLI calls while deploying:
+              #   DescribeStacks  : look the stack up (and detect "stack does not exist")
+              #   GetTemplate     : compare with the local template (skip no-op deploys / show the diff)
+              #   DescribeStackEvents / ListStackResources / DescribeStackResources : progress monitor, failure diagnosis
+              - Effect: Allow
+                Action:
+                  - cloudformation:CreateStack
+                  - cloudformation:UpdateStack
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeStackResources
+                  - cloudformation:ListStackResources
+                  - cloudformation:GetTemplate
+                Resource: !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${StackNamePrefix}-${EnvironmentName}/*
+              # S3: only the practice bucket created by the stack
+              # (<StackNamePrefix>-<EnvironmentName>-<account id>). No object-level action is
+              # needed: the stack manages bucket properties only, and the bucket is retained
+              # (RemovalPolicy.RETAIN) so it is never deleted by the stack.
+              - Effect: Allow
+                Action:
+                  - s3:CreateBucket
+                  - s3:PutBucketVersioning
+                  - s3:PutEncryptionConfiguration
+                  - s3:PutBucketPublicAccessBlock
+                  - s3:PutBucketTagging
+                  - s3:GetBucketLocation
+                  - s3:GetBucketVersioning
+                  - s3:GetEncryptionConfiguration
+                  - s3:GetBucketPublicAccessBlock
+                  - s3:GetBucketTagging
+                  - s3:GetBucketPolicy
+                  - s3:GetBucketAcl
+                  - s3:ListBucket
+                Resource: !Sub arn:${AWS::Partition}:s3:::${StackNamePrefix}-${EnvironmentName}-${AWS::AccountId}
+
+Outputs:
+  RoleArn:
+    Description: Set this as the GitHub Environment secret AWS_ROLE_ARN
+    Value: !GetAtt DeployRole.Arn
+  ExpectedOidcSubject:
+    Description: The immutable `sub` this role trusts (compare it with the Actions log)
+    Value: !Sub repo:${GitHubOwner}@${GitHubOwnerId}/${GitHubRepository}@${GitHubRepositoryId}:environment:${EnvironmentName}
