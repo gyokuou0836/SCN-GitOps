@@ -120,7 +120,7 @@ CDK v2 の既定シンセサイザ（`DefaultStackSynthesizer`）は、デプロ
 
 `infra/lib/s3-practice-stack.ts` はバケット名を `${config.bucketNamePrefix}-${this.account}` で組み立て、
 合成時に `Ref: AWS::AccountId` へ解決します（`infra/bin/app.ts` も `env: { region }` のみを指定）。
-そのためリポジトリにもテンプレートにもアカウント ID が現れず、別アカウントへもそのまま展開できます。
+そのため CDK コードや合成テンプレートにアカウント ID を埋め込まず、別アカウントへもそのまま展開できます（管理者向け手順書には対象アカウント ID を記載しています）。
 
 ### 3. 練習用バケットの設定（旧 `cfn/s3-bucket.yaml` と等価）
 
