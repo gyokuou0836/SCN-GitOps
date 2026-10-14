@@ -71,6 +71,9 @@ jobs:
     runs-on: ubuntu-latest
     # 手動実行は選択値、push はブランチから環境を決定
     environment: ${{ inputs.environment || (github.ref_name == 'deploy_stg' && 'staging') || 'dev' }}
+    concurrency:
+      group: deploy-${{ inputs.environment || (github.ref_name == 'deploy_stg' && 'staging') || 'dev' }}
+      cancel-in-progress: false
     env:
       TARGET_ENV: ${{ inputs.environment || (github.ref_name == 'deploy_stg' && 'staging') || 'dev' }}
     steps:
