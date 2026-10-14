@@ -134,6 +134,7 @@ jobs:
         #   （デプロイロールに cloudformation:CreateChangeSet を付与していないため）
         # --require-approval never: 非対話で実行するため
         # スタック名は infra/config/<env>.json の stackName と一致している
+        # `cdk bootstrap` は不要（infra/bin/app.ts で LegacyStackSynthesizer を指定。理由は docs/iam/README.md）
         run: |
           npx cdk deploy --all \
             --context env="${TARGET_ENV}" \

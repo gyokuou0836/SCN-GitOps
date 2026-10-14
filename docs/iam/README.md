@@ -132,7 +132,7 @@ CDK v2 の `DefaultStackSynthesizer`（既定）は、デプロイ時に次の b
 | bootstrap（S3/ECR/5 ロール） | 必須 | 不要 |
 | デプロイに使う権限 | bootstrap ロール（広い） | **このロール自身（狭い・最小権限）** |
 | テンプレートの渡し方 | S3 へアップロード → `TemplateURL` | `TemplateBody`（インライン、51,200 バイト未満） |
-| アセット（Lambda コード等） | 可 | 不可（本リポジトリでは未使用） |
+| アセット（Lambda コード等） | 可 | 不可（使うには bootstrap のステージングバケットが必要） |
 
 ---
 

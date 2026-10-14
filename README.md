@@ -112,7 +112,7 @@ CDK v2 の既定シンセサイザ（`DefaultStackSynthesizer`）は、デプロ
 | bootstrap リソース | 必須 | 不要 |
 | デプロイに使う権限 | bootstrap ロール（広い） | デプロイロール自身（狭い・最小権限） |
 | テンプレートの渡し方 | S3 へアップロード → `TemplateURL` | `TemplateBody`（インライン） |
-| アセット（Lambda コード等） | 可 | 不可（本リポジトリでは未使用） |
+| アセット（Lambda コード等） | 可 | 不可（使うには bootstrap のステージングバケットが必要。本リポジトリでは未使用） |
 
 実測した Deny の内容と、bootstrap を使わない理由の詳細は [`docs/iam/README.md`](docs/iam/README.md) を参照してください。
 
