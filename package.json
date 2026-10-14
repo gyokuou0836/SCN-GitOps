@@ -1,0 +1,24 @@
+{
+  "name": "scn-gitops",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AWS 環境を AWS CDK (TypeScript) と GitHub Actions (OIDC) でデプロイする GitOps リポジトリ",
+  "license": "UNLICENSED",
+  "scripts": {
+    "build": "tsc",
+    "synth": "cdk synth",
+    "diff": "cdk diff",
+    "deploy": "cdk deploy",
+    "clean": "rm -rf dist cdk.out"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.170.0",
+    "constructs": "^10.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "aws-cdk": "^2.170.0",
+    "ts-node": "^10.9.2",
+    "typescript": "~5.6.3"
+  }
+}

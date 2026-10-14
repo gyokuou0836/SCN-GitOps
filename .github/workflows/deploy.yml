@@ -1,0 +1,145 @@
+name: deploy
+
+on:
+  push:
+    branches: [deploy_dev, deploy_stg] # 将来 deploy_prod を追加
+    paths:
+      - "infra/**"
+      - "package.json"
+      - "package-lock.json"
+      - "cdk.json"
+      - "tsconfig.json"
+      - ".github/workflows/deploy.yml"
+      - ".github/actions/**"
+  pull_request:
+    branches: [deploy_dev, deploy_stg]
+    paths:
+      - "infra/**"
+      - "package.json"
+      - "package-lock.json"
+      - "cdk.json"
+      - "tsconfig.json"
+      - ".github/workflows/deploy.yml"
+      - ".github/actions/**"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options: [dev, staging, prod]
+        default: dev
+
+# OIDC でロールを引き受けるために id-token の書き込みが必要
+# （複合アクション側では付与できないためここで宣言する）
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-northeast-1
+  NODE_VERSION: "22"
+
+jobs:
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run build
+
+      - name: Synthesize the templates (no AWS credentials needed)
+        run: |
+          for env in dev staging prod; do
+            echo "::group::cdk synth env=${env}"
+            npx cdk synth --context env="${env}"
+            echo "::endgroup::"
+          done
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    # 手動実行は選択値、push はブランチから環境を決定
+    environment: ${{ inputs.environment || (github.ref_name == 'deploy_stg' && 'staging') || 'dev' }}
+    env:
+      TARGET_ENV: ${{ inputs.environment || (github.ref_name == 'deploy_stg' && 'staging') || 'dev' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Debug OIDC Token Claims
+        run: |
+          TOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r .value)
+          if [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ]; then
+            echo "=== OIDC Token Header & Payload (signature omitted) ==="
+            python3 -c "
+          import sys, json, base64
+          t = sys.argv[1]
+          parts = t.split('.')
+          def pad(b): return b + '=' * (-len(b) % 4)
+          header = json.loads(base64.urlsafe_b64decode(pad(parts[0])))
+          payload = json.loads(base64.urlsafe_b64decode(pad(parts[1])))
+          print('Header:', json.dumps(header))
+          # 重要なクレームのみ出力
+          for k in ['iss', 'aud', 'sub', 'repository', 'environment', 'ref', 'actor']:
+              print(f'  {k}: {payload.get(k)}')
+          " "$TOKEN"
+          fi
+
+      - name: Show Expected OIDC Subject
+        env:
+          OWNER_ID: ${{ github.repository_owner_id }}
+          REPO_ID: ${{ github.repository_id }}
+        run: |
+          OWNER="${GITHUB_REPOSITORY%%/*}"
+          REPO="${GITHUB_REPOSITORY#*/}"
+          echo "=== 信頼ポリシーが必要とする sub (immutable subject) ==="
+          if [ -n "$OWNER_ID" ] && [ -n "$REPO_ID" ]; then
+            echo "  repo:${OWNER}@${OWNER_ID}/${REPO}@${REPO_ID}:environment:${TARGET_ENV}"
+          else
+            echo "  repo:<owner>@<owner-id>/<repo>@<repo-id>:environment:${TARGET_ENV}"
+          fi
+          echo "  ※ 上の Debug ステップの sub と一致しない場合は sts:AssumeRoleWithWebIdentity が失敗します"
+          echo "  ※ 手順: docs/iam/README.md"
+
+      - name: Configure AWS credentials
+        uses: ./.github/actions/aws-auth
+        with:
+          role-arn: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Show the assumed identity
+        run: aws sts get-caller-identity
+
+      - name: Deploy stack
+        # --method=direct: 変更セットを作らず CreateStack/UpdateStack を直接呼ぶ
+        #   （デプロイロールに cloudformation:CreateChangeSet を付与していないため）
+        # --require-approval never: 非対話で実行するため
+        # スタック名は infra/config/<env>.json の stackName と一致している
+        run: |
+          npx cdk deploy --all \
+            --context env="${TARGET_ENV}" \
+            --method=direct \
+            --require-approval never \
+            --outputs-file cdk-outputs.json
+
+      - name: Show stack outputs
+        run: cat cdk-outputs.json

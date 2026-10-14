@@ -1,0 +1,6 @@
+{
+  "environment": "prod",
+  "awsRegion": "ap-northeast-1",
+  "stackName": "scn-gitops-s3-practice-prod",
+  "bucketNamePrefix": "scn-gitops-s3-practice-prod"
+}
